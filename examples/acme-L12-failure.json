@@ -1,0 +1,24 @@
+{
+ "schema_version": "1.0", "domain": "ip", "snapshot_id": "ip-lab-001",
+ "question": "If L-12 fails at t=10, does acme keep its loss under 1%?",
+ "topology": {
+  "nodes": [{"id": "pe-a"}, {"id": "pe-b"}, {"id": "p-1"}, {"id": "p-2"}, {"id": "p-3"}, {"id": "dc-1"}],
+  "links": [
+   {"id": "L-a1", "a": "pe-a", "z": "p-1", "rate_mbps": 100, "delay_ms": 2},
+   {"id": "L-12", "a": "p-1", "z": "p-2", "rate_mbps": 100, "delay_ms": 8},
+   {"id": "L-2b", "a": "p-2", "z": "pe-b", "rate_mbps": 100, "delay_ms": 2},
+   {"id": "L-13", "a": "p-1", "z": "p-3", "rate_mbps": 40, "delay_ms": 12},
+   {"id": "L-3b", "a": "p-3", "z": "pe-b", "rate_mbps": 40, "delay_ms": 12},
+   {"id": "L-bd", "a": "pe-b", "z": "dc-1", "rate_mbps": 100, "delay_ms": 1}
+  ]
+ },
+ "traffic": {"demands": [
+   {"id": "acme", "src": "pe-a", "dst": "pe-b", "protocol": "udp", "rate_mbps": 30, "start_s": 1, "stop_s": 30},
+   {"id": "globex", "src": "pe-a", "dst": "dc-1", "protocol": "udp", "rate_mbps": 20, "start_s": 1, "stop_s": 30}
+ ]},
+ "change": {"events": [{"t": 10, "type": "link_down", "target": "L-12"}]},
+ "duration_s": 30,
+ "requirements": [{"demand": "acme", "kpi": "loss_ratio", "op": "<", "value": 0.01}],
+ "uncertain_params": [{"path": "demands.globex.rate_mbps", "dist": "normal", "mean": 20, "std": 3}],
+ "seed_policy": {"runs": 20, "max_runs": 40}
+}
