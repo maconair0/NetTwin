@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.png" alt="NetTwin: rehearse the change before you make it." width="720"></p>
 
-# NetTwin (netwins)
+# NetTwin (network digital twins)
 
 **NetTwin runs a network change, or a failure, on a digital copy of the network before the real one sees it.** It then says
 whether the change can go ahead, how sure it is, and why.
