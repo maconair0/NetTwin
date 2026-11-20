@@ -68,7 +68,8 @@ def find(name: str) -> Optional[Dict[str, Any]]:
 
 
 def _missing(name: str) -> Dict[str, Any]:
-    return {"error": f"no domain or snapshot called {name!r}",
+    return {"error": f"no snapshot called {name!r} (a twin needs no snapshot: when the network is described in "
+                     f"the question, build the scenario from that, with twin_schema(domain)'s example)",
             "available": [{"domain": d, "snapshot_id": sid} for d, sid in domains().items()]}
 
 
@@ -104,8 +105,42 @@ def subnetwork(domain: str, anchors: List[str], hops: int = 2) -> Dict[str, Any]
     for _ in range(max(0, int(hops))):
         frontier = {m for n in frontier for m in adj.get(n, ())} - keep
         keep |= frontier
+    # Traffic that crosses the slice is part of it: a demand whose path touches the slice comes in with its
+    # whole path (and every path it could take round the slice's links), or the slice would show its links
+    # emptier than they are. Only demands that never touch it are left out, and they are named.
+    demands = s.get("traffic", {}).get("demands", [])
+    taken, left = [], []
+    for d in demands:
+        if d["src"] not in adj or d["dst"] not in adj:
+            left.append(d["id"])
+            continue
+        routes = _paths(adj, d["src"], d["dst"])
+        if any(set(r) & keep for r in routes):
+            for r in routes:
+                keep |= set(r)
+            taken.append(d["id"])
+        else:
+            left.append(d["id"])
     return {"snapshot_id": s["snapshot_id"], "domain": s.get("domain"), "age_s": age_s(s),
             "topology": {"nodes": [n for n in t["nodes"] if n["id"] in keep],
                          "links": [l for l in t["links"] if l["a"] in keep and l["z"] in keep]},
-            "traffic": {"demands": [d for d in s.get("traffic", {}).get("demands", [])
-                                    if d["src"] in keep and d["dst"] in keep]}}
+            "traffic": {"demands": [d for d in demands if d["id"] in taken]},
+            "left_out": {"demands": left, "why": "they never touch this slice"} if left else {}}
+
+
+def _paths(adj: Dict[str, set], src: str, dst: str, limit: int = 8, max_len: int = 12) -> List[List[str]]:
+    """Up to `limit` loop-free paths from src to dst, shortest first: where a demand could run, including
+    round a failure."""
+    out: List[List[str]] = []
+    queue = [[src]]
+    while queue and len(out) < limit:
+        path = queue.pop(0)
+        if path[-1] == dst:
+            out.append(path)
+            continue
+        if len(path) > max_len:
+            continue
+        for m in sorted(adj.get(path[-1], ())):
+            if m not in path:
+                queue.append(path + [m])
+    return out

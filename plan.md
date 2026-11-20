@@ -54,7 +54,7 @@ operator ──► CANAH (agent, approvals, audit, checks, web page)
 | aggregation, paired deltas, adaptive stopping | `netwins/aggregate.py` |
 | calibration store, conformal intervals, trust tier | `netwins/calibration.py` |
 | envelope, policy gate | `netwins/envelope.py`, `netwins/policy.py` |
-| CANAH provider and skills | `netwins/canah_provider.py`, `skills/ip-twin/`, `skills/twin-first/` |
+| the `canah.twin/1` contract, in-process and over HTTP; skills | `netwins/contract.py`, `netwins/service.py`, `skills/` |
 | ns-3 engine | `engine/` (Docker image `netwins-ns3:3.43`) |
 | live mirror, write translation, gate | `netwins/source.py`, `mirror.py`, `changes.py`, `gate.py` |
 
@@ -72,12 +72,12 @@ operator: "create a 60 Mbit/s service from pe-a to pe-b"
         ├ twin_check_write(lab, add_path, {...})
         │    translate by contract verb → scenario change (add / remove demand, set rate, link down)
         │    → twin_predict (paired, calibrated, capped) → policy decision → check id
-        ├ propose            → lab__add_path → CANAH approval (operator) → TwinGate: check found → sent
+        ├ propose            → lab__add_path → CANAH approval (operator) → CANAH's twin gate: check found → sent
         ├ reject             → not sent; the figures go to the operator
         ├ ask_operator       → the agent asks (a rate, an end); checks again with `answers`
-        └ not_modelled /     → the operator decides; twin_override (approved) → TwinGate lets that change through
+        └ not_modelled /     → the operator decides; twin_override (approved) → CANAH's gate lets that change through
           gather_more_data
-TwinGate (middleware on every agent): a write with no fresh check is checked at the gate and held unless
+The gate (CANAH's, on every agent; any twin that implements check_write): a write with no fresh check is checked at the gate and held unless
 the twin supports it. A check is matched by the change it makes in the twin, not by its argument text.
 ```
 
@@ -171,6 +171,12 @@ Every threshold, the allow-list and the step bounds are settings, and the gate's
 
 **Reuse test:** the second domain must need only a new engine program, schema block and skill. If the provider, pipeline or policy has to change, fix the abstraction first.
 
+**Held (2026-11-20).** Before the optical and Wi-Fi twins, the IP-specific parts were moved behind a registry
+(`netwins/domains.py`: model, checks, change, settable paths, engine, example, limits of fidelity, skill). The
+twins then needed only their own module, engine and skill. Two shared fixes came with them, both for every
+twin: aggregation takes every KPI an engine reports, and conformal intervals are centred on the learned bias
+(a model that is consistently low is moved, not only widened).
+
 ## 9. Evaluation
 
 1. **Agent:** 30–50 requests per domain. Measured: schema- and semantically-valid rate, first-try success, retries, end-to-end success. These run in CANAH's test-bed runner style, with checked answers.
@@ -184,12 +190,13 @@ Every threshold, the allow-list and the step bounds are settings, and the gate's
 | Phase | Work | Exit criterion | Status |
 |---|---|---|---|
 | 0. Foundations | schema, engine image, runner, aggregation, envelope, policy, unit tests | JSON → ns-3 ensemble → envelope round trip | **done** (2026-11-19): ns-3.43 image, 19 unit tests incl. a real-engine test |
-| 1b. Live loop | mirror through the agentic MCP, write translation by contract verb, checks, overrides, TwinGate, SDN lab fixture | CANAH end to end on the lab: supported writes go, unsupported are held, questions reach the operator | **built** (2026-11-19); see the integration results |
+| 1b. Live loop | mirror through the agentic MCP, write translation by contract verb, checks, overrides, the gate (now CANAH's, twin-neutral), SDN lab fixture | CANAH end to end on the lab: supported writes go, unsupported are held, questions reach the operator | **built** (2026-11-19); see the integration results |
 | 1. IP twin in CANAH | provider, skill, state snapshots, adaptive paired ensembles, cache, eval set (30) | the eval set passes with no manual fixes | **partly**: provider, skill, snapshots, paired adaptive ensembles and cache built; not yet run inside CANAH; no eval set |
 | 2. Calibration | synthetic truth, then testbed measurements on the IP lab; coverage and reliability | coverage near nominal on held-out data | **synthetic only**: raw p5–p95 coverage 0.0, conformal LOO 0.91 (n=90); no testbed data yet |
 | 3. Decisions | policy eval on historical cases; approval → apply → verify → rollback through CANAH | calibrated beats point estimates | |
-| 4. Optical | GNPy pre-processor plus point-to-point abstraction | GSNR/BER against testbed measurements within thresholds | |
-| 5–6. Wireless, NTN | after checking the toolchains | validated on controlled scenarios | |
+| 4. Optical | GNPy pre-processor plus point-to-point abstraction | GSNR/BER against testbed measurements within thresholds | **done** (2026-11-20): GNPy per lightpath (restoration, modes 100–400G, margin, BER) and a fluid packet layer; against the lab's physics (177 kept lines of edgeLM's Physical Layer Simulator, rebuilt from their launch powers and measured NF): raw bias −4.2 dB, MAE 4.65 dB; bias-corrected LOO MAE 2.5 dB; conformal 90% ±5.0 dB, coverage 0.91 |
+| 5. Wireless | ns-3 Wi-Fi (bridged APs, roaming on one channel) | validated on controlled scenarios | **done** (2026-11-20): distance, airtime sharing, roaming within a channel and not across, on real ns-3 |
+| 6. NTN | after checking the toolchains | validated on controlled scenarios | |
 | 7. Live mode | real-time scheduler, shadow mode only | shadow predictions track reality | |
 
 ## 11. Risks
@@ -214,3 +221,13 @@ Every threshold, the allow-list and the step bounds are settings, and the gate's
 4. Each twin's fidelity is measured and reported with its limits.
 
 **Not claimed:** a universal twin, unified cross-domain physics, or autonomous changes to a live network.
+
+
+## 13. The contract (2026-11-20)
+
+netwins is used through `canah.twin/1`, the contract CANAH defines for any digital twin: describe, validate,
+predict, and optionally check_write and extras, in one standard shape (decision, probability, trust, figures,
+the change that ran, what is not modelled). The agent-side pieces moved to CANAH (`canah/twins`): the tools, the
+write gate and the operators' overrides, which are now the same for any twin. netwins keeps the twins, the mirror
+and the write translation, and serves the contract in-process (`netwins.contract:twin`) and over HTTP
+(`python -m netwins serve`).

@@ -1,0 +1,95 @@
+{
+ "schema_version": "1.0",
+ "domain": "optical",
+ "snapshot_id": "<the snapshot it came from>",
+ "question": "if fibre F-ab is cut, does LP-1 keep a 3 dB margin after it restores?",
+ "topology": {
+  "nodes": [
+   {
+    "id": "A"
+   },
+   {
+    "id": "B"
+   },
+   {
+    "id": "C"
+   }
+  ],
+  "links": [
+   {
+    "id": "F-ab",
+    "a": "A",
+    "z": "B",
+    "length_km": 240
+   },
+   {
+    "id": "F-ac",
+    "a": "A",
+    "z": "C",
+    "length_km": 400
+   },
+   {
+    "id": "F-cb",
+    "a": "C",
+    "z": "B",
+    "length_km": 380
+   }
+  ]
+ },
+ "traffic": {
+  "lightpaths": [
+   {
+    "id": "LP-1",
+    "src": "A",
+    "dst": "B",
+    "rate_gbps": 200,
+    "path": [
+     "F-ab"
+    ],
+    "restore": true
+   }
+  ],
+  "demands": [
+   {
+    "id": "acme",
+    "lightpath": "LP-1",
+    "rate_mbps": 40000
+   }
+  ]
+ },
+ "change": {
+  "events": [
+   {
+    "t": 0,
+    "type": "link_down",
+    "target": "F-ab"
+   }
+  ]
+ },
+ "requirements": [
+  {
+   "demand": "LP-1",
+   "kpi": "margin_db",
+   "op": ">=",
+   "value": 3
+  }
+ ],
+ "uncertain_params": [
+  {
+   "path": "links.F-ac.loss_db_per_km",
+   "dist": "normal",
+   "mean": 0.21,
+   "std": 0.01
+  },
+  {
+   "path": "links.F-cb.loss_db_per_km",
+   "dist": "normal",
+   "mean": 0.21,
+   "std": 0.01
+  }
+ ],
+ "seed_policy": {
+  "runs": 10,
+  "max_runs": 40
+ }
+}

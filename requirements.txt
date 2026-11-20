@@ -1,0 +1,6 @@
+# netwins: the twins. In CANAH's environment too when netwins is a CANAH provider.
+pydantic>=2.6
+numpy>=1.26
+requests>=2.31
+pyyaml>=6
+gnpy==3.0.1

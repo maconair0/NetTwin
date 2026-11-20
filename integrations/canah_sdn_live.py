@@ -131,9 +131,6 @@ def main(argv=None) -> int:
     from canah import approval, build_agent, load_settings, models
     from canah.identity import Identity
     from canah.network import AgenticMCP, AgenticMCPProvider
-    from netwins.canah_provider import NetwinsProvider
-    from netwins.gate import TwinGate
-    from netwins.source import AgenticSource
     from netwins.testing.sdn_lab import serve
 
     srv, url, lab = serve()
@@ -142,9 +139,10 @@ def main(argv=None) -> int:
     s.home = str(home / "canah")
     s.sandbox = "none"
     s.skills_dirs = s.skills_dirs + [str(HERE / "skills")]
-    nw = NetwinsProvider(home=str(home), source=AgenticSource(url))
-    nw.checker.interval_s = 2.0
-    agent = build_agent(s, [AgenticMCPProvider(service=AgenticMCP(url, token="")), nw], middleware=[TwinGate()])
+    os.environ.update({"AGENTIC_MCP_URL": url, "AGENTIC_MCP_TOKEN": "", "NETWINS_MIRROR_INTERVAL_S": "2"})
+    s.twins = [{"name": "netwins", "kind": "python", "spec": "netwins.contract:twin", "path": str(HERE)}]
+    s.twin_active = "netwins"
+    agent = build_agent(s, [AgenticMCPProvider(service=AgenticMCP(url, token=""))])
     who = Identity("operator", "admin")
     print(f"model {models.describe()['model']} · {agent.info['tools']} tools · engine {a.engine} · "
           f"calibration {'given' if a.calibration else 'none'} · lab {url} · home {home}", flush=True)
@@ -153,8 +151,11 @@ def main(argv=None) -> int:
     rows = []
     for c in [c for c in CASES if not only or c.id in only]:
         lab.reset()
-        nw.checker.checks.clear()
-        nw.checker.by_key.clear()
+        agent.twin_checks.by_id.clear()
+        from netwins.contract import twin as netwins_twin
+        if netwins_twin()._checker is not None:
+            netwins_twin()._checker.checks.clear()
+            netwins_twin()._checker.by_key.clear()
         for f in (home / "snapshots").glob("*.json"):
             f.unlink()
         thread = f"sdn-{int(time.time())}-{c.id}"
@@ -174,7 +175,7 @@ def main(argv=None) -> int:
         except Exception as e:  # noqa: BLE001 - a crash is a failed case
             err = f"{type(e).__name__}: {e}"
         checks = [{k: v.get(k) for k in ("tool", "arguments", "action", "override")}
-                  for v in nw.checker.checks.values()]
+                  for v in agent.twin_checks.by_id.values()]
         why = err or c.check(text, calls, lab, checks)
         rows.append({"case": c.id, "ok": not why, "why": why, "seconds": round(time.time() - t0, 1),
                      "calls": names(calls), "approved": approved, "lab_writes": lab.writes,

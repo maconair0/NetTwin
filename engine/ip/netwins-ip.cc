@@ -129,10 +129,16 @@ main(int argc, char* argv[])
                                StringValue(std::to_string(l.value("rate_mbps", 100.0)) + "Mbps"));
         p2p.SetChannelAttribute("Delay",
                                 StringValue(std::to_string(l.value("delay_ms", 1.0)) + "ms"));
-        p2p.SetQueue("ns3::DropTailQueue",
-                     "MaxSize",
-                     StringValue(std::to_string(l.value("queue_pkts", 100)) + "p"));
+        // queue_pkts is the link's whole buffer: a FIFO queue disc of that size in front of a device queue
+        // of a few packets. Left alone, ns-3 puts its default queue disc (FqCoDel, thousands of packets)
+        // in front of the device, and a congested link then queues for far longer than queue_pkts says.
+        p2p.SetQueue("ns3::DropTailQueue", "MaxSize", StringValue("4p"));
         NetDeviceContainer devs = p2p.Install(nodes[a], nodes[z]);
+        TrafficControlHelper tch;
+        tch.SetRootQueueDisc("ns3::FifoQueueDisc",
+                             "MaxSize",
+                             StringValue(std::to_string(l.value("queue_pkts", 100)) + "p"));
+        tch.Install(devs);
         const double loss = l.value("loss_rate", 0.0);
         if (loss > 0)
         {

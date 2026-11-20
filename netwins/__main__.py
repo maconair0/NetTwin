@@ -1,9 +1,14 @@
 """
   python -m netwins validate SCENARIO.json
   python -m netwins predict SCENARIO.json [--engine docker|fake|local:<binary>] [--full]
-  python -m netwins calibrate-synthetic [--n 30] [--engine ...]     fill the calibration store (synthetic)
-  python -m netwins status                                         calibration and snapshots
-  python -m netwins schema                                         the scenario JSON Schema
+  python -m netwins calibrate-synthetic [--n 30] [--engine ...]     fill the IP calibration store (synthetic)
+  python -m netwins calibrate-optical-lab                          the optical twin against the lab's physics:
+                                                                   its error per line, into the calibration store
+  python -m netwins status                                         calibration (every twin) and snapshots
+  python -m netwins schema [--domain ip|optical|wifi]              a twin's scenario JSON Schema
+  python -m netwins serve [--host 127.0.0.1] [--port 8420]         the canah.twin/1 contract over HTTP
+
+A scenario file names its own domain ("domain": "optical"), and predict runs that twin.
 
 State lives in NETWINS_HOME (default ./netwins_data): calibration.sqlite, runs/.
 """
@@ -16,7 +21,6 @@ from pathlib import Path
 from . import state
 from .calibration import Calibration
 from .runner import DockerEngine, FakeEngine, LocalEngine
-from .schema import json_schema
 from .twin import Twin
 
 
@@ -30,7 +34,10 @@ def engine_of(spec: str):
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="netwins")
-    ap.add_argument("command", choices=["validate", "predict", "calibrate-synthetic", "status", "schema"])
+    ap.add_argument("command", choices=["validate", "predict", "calibrate-synthetic", "calibrate-optical-lab", "status", "schema", "serve"])
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8420)
+    ap.add_argument("--domain", default="ip")
     ap.add_argument("file", nargs="?")
     ap.add_argument("--engine", default=os.getenv("NETWINS_ENGINE", "docker"))
     ap.add_argument("--n", type=int, default=30)
@@ -39,14 +46,33 @@ def main(argv=None) -> int:
     home = Path(os.getenv("NETWINS_HOME", "netwins_data"))
     home.mkdir(parents=True, exist_ok=True)
     cal = Calibration(home / "calibration.sqlite")
+    from . import domains
+    if a.command == "serve":
+        import logging
+        from .service import serve
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+        srv = serve(a.host, a.port)
+        print(f"netwins (canah.twin/1) on http://{a.host}:{a.port}/twin", flush=True)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            srv.shutdown()
+        return 0
     if a.command == "schema":
-        print(json.dumps(json_schema(), indent=1))
+        print(json.dumps(domains.get(a.domain).model.model_json_schema(), indent=1))
         return 0
     if a.command == "status":
+        kpis = {"ip": ("throughput_mbps", "delay_ms_mean", "jitter_ms_mean", "loss_ratio"),
+                "optical": ("gsnr_db", "margin_db"), "wifi": ("throughput_mbps", "delay_ms_mean", "loss_ratio")}
         print(json.dumps({"snapshots": state.domains(),
-                          "calibration": {k: cal.status("ip", k) for k in ("throughput_mbps", "delay_ms_mean",
-                                                                            "jitter_ms_mean", "loss_ratio")}},
+                          "calibration": {d: {k: cal.status(d, k) for k in ks} for d, ks in kpis.items()}},
                          indent=1, default=str))
+        return 0
+    if a.command == "calibrate-optical-lab":
+        from . import optical_lab
+        rows = optical_lab.compare()
+        got = optical_lab.calibrate(cal, rows)
+        print(json.dumps({"against_the_lab": optical_lab.report(rows), "calibration": got["status"]}, indent=1, default=str))
         return 0
     twin = Twin(engine_of(a.engine), cal)
     if a.command == "calibrate-synthetic":

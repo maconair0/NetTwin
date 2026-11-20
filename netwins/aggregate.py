@@ -41,7 +41,10 @@ def summarise(results: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for d in demands:
         out[d] = {}
-        for k in KPIS:
+        # Every KPI the engine reports for this entity (each domain has its own), IP's first in their order.
+        found = {k for m in sides["changed"].values() for k, v in (m.get(d) or {}).items()
+                 if v is None or isinstance(v, (int, float)) and not isinstance(v, bool)}
+        for k in [*[x for x in KPIS if x in found], *sorted(found - set(KPIS) - {"tx_packets", "rx_packets"})]:
             changed = [sides["changed"][s].get(d, {}).get(k) for s in seeds]
             entry = {"changed": _stats(changed)}
             if sides["baseline"]:

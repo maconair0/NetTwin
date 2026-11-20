@@ -112,14 +112,15 @@ def main(argv=None) -> int:
 
     from canah import build_agent, load_settings, models
     from canah.identity import Identity
-    from netwins.canah_provider import provider
 
     s = load_settings(path=str(CANAH / "canah.yaml"))
     s.providers = []
     s.home = str(home / "canah")
     s.sandbox = "none"
     s.skills_dirs = s.skills_dirs + [str(HERE / "skills")]
-    agent = build_agent(s, [provider()])
+    s.twins = [{"name": "netwins", "kind": "python", "spec": "netwins.contract:twin", "path": str(HERE)}]
+    s.twin_active = "netwins"
+    agent = build_agent(s, [])
     who = Identity("operator", "admin")
     print(f"model {models.describe()['model']} · {agent.info['tools']} tools · engine {a.engine} · "
           f"calibration {'given' if a.calibration else 'none'} · home {home}", flush=True)

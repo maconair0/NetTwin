@@ -1,20 +1,13 @@
 """
-No write reaches a network the twin covers without the twin's check, or an operator's explicit word
-to go ahead without it.
+A controller write tried in the twin before it is sent: the netwins side of the contract's check_write
+(contract.py). The gate that holds writes to these checks, and the operators' overrides, are the agent's
+(CANAH's canah/twins): any twin that implements check_write is held to the same rules.
 
   Checker      runs a check: mirror the controller if its snapshot is stale, translate the write into a
                scenario (changes.py), predict, decide (policy.py). Keeps every check under an id, keyed by
                (controller, tool, arguments), so the write that follows finds it.
-  TwinGate     CANAH middleware, on the main agent and every subagent (canah.yaml `middleware`). When a
-               controller write is about to run (after the operator approved it):
-                 a fresh check with a go-ahead (propose, auto_apply_eligible)   it runs
-                 an operator override of that check (twin_override, approved)   it runs, noted
-                 no check yet                                                  the check runs now, then as above
-                 anything else (reject, ask_operator, gather_more_data,        it does not run; the agent is told
-                   not_modelled)                                               why and what to do next
 
-Writes to controllers whose domain has no twin (optical, today) pass untouched, unless
-NETWINS_GATE_STRICT=1, which holds them to an override too.
+A controller whose domain netwins does not mirror (optical controllers, today) gets "no_twin".
 
   NETWINS_MIRROR_MAX_AGE_S   re-mirror before a check when the snapshot is older (default 300)
   NETWINS_CHECK_TTL_S        a check is good for this long (default 900)
@@ -212,7 +205,7 @@ class Checker:
         if self.runs_dir:
             Path(self.runs_dir).mkdir(parents=True, exist_ok=True)
             (Path(self.runs_dir) / f"{env['run_id']}.json").write_text(json.dumps(env, default=str))
-        rec.update(action=env["decision"]["action"], reasons=env["decision"]["reasons"], twin=compact(env),
+        rec.update(action=env["decision"]["action"], reasons=env["decision"]["reasons"], twin=compact(env), envelope=env,
                    change=t["scenario"]["change"], assumptions=t.get("assumptions", []),
                    snapshot_coverage=snap.get("coverage"), snapshot_assumed=[p for p in snap.get("provenance", [])
                                                                              if p.startswith("assumed")])
@@ -234,8 +227,14 @@ class Checker:
             if not reason.strip():
                 return {"ok": False, "error": "an override needs the operator's reason"}
             rec["override"] = {"by": by or _user(), "reason": reason, "at": time.time()}
-        return {"ok": True, "check_id": check_id, "override": rec["override"],
-                "next": "The operator's override is recorded. Send the write exactly as checked."}
+        call = f"{rec['controller']}__{rec['tool']}"
+        return {"ok": True, "check_id": check_id, "override": rec["override"], "send_as": call,
+                "arguments": rec["arguments"],
+                "next": (f"The operator's override is recorded. Send the write now: call {call} with exactly these "
+                         f"arguments: {json.dumps(rec['arguments'])}. If you do not hold that tool, delegate to the "
+                         f"{rec['controller']} subagent with these words: \"Call {call} now with arguments "
+                         f"{json.dumps(rec['arguments'])}; the twin's check {check_id} was overridden by the operator.\" "
+                         f"Then read the result back.")}
 
     def verdict(self, controller: str, tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """The check a write is held to: the latest one for exactly this call, if still fresh; else a new one."""
@@ -263,9 +262,6 @@ class Checker:
         return self.check(controller, tool, args)
 
 
-CHECKER: Optional[Checker] = None      # set by the netwins provider; the gate reads it
-
-
 def summary(rec: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: rec[k] for k in ("check_id", "controller", "tool", "asked_as", "verb", "action", "reasons", "next",
                                "questions", "write_tools", "snapshot_id", "change", "override") if rec.get(k) is not None}
@@ -279,56 +275,3 @@ def summary(rec: Dict[str, Any]) -> Dict[str, Any]:
     if rec.get("snapshot_assumed"):
         out["snapshot_assumed"] = rec["snapshot_assumed"]
     return out
-
-
-try:
-    from langchain.agents.middleware import AgentMiddleware
-    from langchain_core.messages import ToolMessage
-except ImportError:  # netwins without CANAH's dependencies: the gate is not used there
-    AgentMiddleware = object          # type: ignore
-    ToolMessage = None                # type: ignore
-
-
-class TwinGate(AgentMiddleware):
-    """canah.yaml:  middleware: [netwins.gate:TwinGate]"""
-
-    def __init__(self, strict: Optional[bool] = None):
-        super().__init__()
-        self.strict = (os.getenv("NETWINS_GATE_STRICT", "") == "1") if strict is None else strict
-
-    def _hold(self, request):
-        """(a message that stops the write, or None; the check that let it through, or None)."""
-        name = str(request.tool_call.get("name") or "")
-        if "__" not in name or CHECKER is None:
-            return None, None
-        controller, tool = name.split("__", 1)
-        if CHECKER.is_write(controller, tool) is not True:
-            return None, None
-        args = request.tool_call.get("args") or {}
-        rec = CHECKER.verdict(controller, tool, args)
-        if rec["action"] in GO or rec.get("override"):
-            return None, rec
-        if rec["action"] == "no_twin" and not self.strict:
-            return None, None
-        body = summary(rec)
-        return ToolMessage(tool_call_id=request.tool_call["id"], name=name, status="error", content=(
-            f"Not sent: the digital twin holds this write ({rec['action']}).\n" + json.dumps(body, indent=1, default=str))), None
-
-    def _after(self, rec, result):
-        if rec is None or ToolMessage is None or not isinstance(result, ToolMessage):
-            return result
-        note = (f"\n\n[Checked in the digital twin first: check {rec['check_id']}, {rec['action']}"
-                + (f", overridden by {rec['override']['by']}: {rec['override']['reason']}" if rec.get("override") else "")
-                + (f", p={rec['twin']['p_meets_requirement']['p']:.3f}, tier {rec['twin']['trust_tier']}"
-                   if rec.get("twin") else "") + ".]")
-        text = result.content if isinstance(result.content, str) else str(result.content)
-        return result.model_copy(update={"content": text + note})
-
-    def wrap_tool_call(self, request, handler: Callable):
-        held, rec = self._hold(request)
-        return held if held is not None else self._after(rec, handler(request))
-
-    async def awrap_tool_call(self, request, handler: Callable):
-        import asyncio
-        held, rec = await asyncio.to_thread(self._hold, request)
-        return held if held is not None else self._after(rec, await handler(request))

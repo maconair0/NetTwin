@@ -5,7 +5,7 @@ description: "How to answer a 'what if' question about an IP network with the di
 
 # Asking the IP twin
 
-1. **Find the slice.** Call `twin_subnetwork(domain="ip", anchors="<the nodes involved>", hops=2)` and copy its
+1. **Find the slice.** Call `twin_extra("subnetwork", {"network": "ip", "anchors": ["<the nodes or links involved>"]})` and copy its
    topology and demands into the scenario as they are. Never invent links or rates.
 2. **Put the what-if in `change`.**
    - A failure goes in `change.events`: `{"t": 10, "type": "link_down", "target": "<link id>"}`.

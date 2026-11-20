@@ -43,10 +43,19 @@ class Lab(unittest.TestCase):
         os.environ.pop("NETWINS_SNAPSHOTS", None)
 
 
+class Slicing(unittest.TestCase):
+    def test_traffic_that_crosses_the_slice_comes_with_it(self):
+        from netwins import state
+        got = state.subnetwork("ip", ["pe-a", "pe-b"], 1)
+        ids = {d["id"] for d in got["traffic"]["demands"]}
+        self.assertEqual(ids, {"acme", "globex", "backup"})      # globex and backup end at dc-1, outside
+        self.assertIn("dc-1", {n["id"] for n in got["topology"]["nodes"]})
+
+
 class Mirroring(Lab):
     def test_a_mirrored_scenario_runs_on_the_real_engine(self):
         import subprocess
-        if subprocess.run(["docker", "--context", "default", "image", "inspect", "netwins-ns3:3.43"],
+        if subprocess.run(["docker", "--context", "default", "image", "inspect", "netwins-ns3:3.43-r2"],
                           capture_output=True).returncode != 0:
             self.skipTest("the netwins-ns3 image is not built")
         from netwins.runner import DockerEngine
@@ -240,77 +249,39 @@ class Checking(Lab):
                                                      "bandwidth_mbps": 35})["action"], "reject")
 
 
-try:
-    from langchain_core.messages import ToolMessage  # noqa: F401
-    LANGCHAIN = True
-except ImportError:
-    LANGCHAIN = False
+class ContractCheck(Lab):
+    """check_write through the contract: what an agent's gate holds a controller write to."""
 
-
-class _Req:
-    def __init__(self, name, args):
-        self.tool_call = {"name": name, "args": args, "id": "call-1"}
-
-
-@unittest.skipUnless(LANGCHAIN, "langchain is not installed (run with CANAH's Python)")
-class Gate(Lab):
     def setUp(self):
         super().setUp()
-        from netwins import gate
-        gate.CHECKER = self.checker
-        self.gate = gate.TwinGate()
-        self.sent = []
+        import tempfile
+        from netwins.contract import NetwinsTwin
+        self.t = NetwinsTwin(home=tempfile.mkdtemp(), engine="fake", source=AgenticSource(self.url))
+        self.t.twin = Twin(FakeEngine(), calibrated())
+        os.environ["NETWINS_MIRROR_INTERVAL_S"] = "0.3"
 
-    def tearDown(self):
-        from netwins import gate
-        gate.CHECKER = None
-        super().tearDown()
+    def test_a_supported_write_may_go_and_says_how(self):
+        c = self.t.check_write("lab", "provision", {"name": "w", "from": "pe-a", "to": "dc-1", "bandwidth_mbps": 10}, {})
+        self.assertEqual((c["action"], c["tool"]), ("propose", "add_path"))
+        self.assertIn("lab__add_path", c["send_as"])
+        self.assertEqual(c["result"]["decision"]["action"], "propose")
+        self.assertEqual(c["change_ran"]["add_demands"][0]["rate_mbps"], 10.0)
 
-    def handler(self, req):
-        from langchain_core.messages import ToolMessage
-        self.sent.append(req.tool_call["name"])
-        return ToolMessage(tool_call_id="call-1", content="done")
+    def test_a_rejected_or_unclear_write_says_what_next(self):
+        c = self.t.check_write("lab", "add_path", {"name": "b", "from": "pe-a", "to": "pe-b", "bandwidth_mbps": 60}, {})
+        self.assertEqual(c["action"], "reject")
+        c = self.t.check_write("lab", "add_path", {"name": "v", "from": "pe-a", "to": "pe-b"}, {})
+        self.assertEqual(c["action"], "ask_operator")
+        self.assertTrue(c["questions"])
+        c = self.t.check_write("lab", "add_path", {"name": "v", "from": "pe-a", "to": "pe-b"}, {"rate_mbps": 15})
+        self.assertEqual(c["action"], "propose")
 
-    def test_a_supported_write_goes_and_says_it_was_checked(self):
-        out = self.gate.wrap_tool_call(_Req("lab__add_path", {"name": "w", "from": "pe-a", "to": "dc-1",
-                                                              "bandwidth_mbps": 10}), self.handler)
-        self.assertEqual(self.sent, ["lab__add_path"])
-        self.assertIn("Checked in the digital twin first", out.content)
-
-    def test_a_rejected_write_is_held_even_unchecked(self):
-        out = self.gate.wrap_tool_call(_Req("lab__add_path", {"name": "b", "from": "pe-a", "to": "pe-b",
-                                                              "bandwidth_mbps": 60}), self.handler)
-        self.assertEqual(self.sent, [])
-        self.assertIn("Not sent", out.content)
-        self.assertIn("reject", out.content)
-
-    def test_reads_and_other_tools_pass(self):
-        self.gate.wrap_tool_call(_Req("lab__get_wiring", {}), self.handler)
-        self.gate.wrap_tool_call(_Req("twin_mirror", {"controller": "lab"}), self.handler)
-        self.assertEqual(len(self.sent), 2)
-
-    def test_an_override_lets_a_held_write_through(self):
-        args = {"dpid": "p-1", "port_no": 2, "admin_state": "down"}
-        rec = self.checker.check("lab", "set_port", args)
-        self.assertEqual(rec["action"], "reject")
-        self.assertFalse(self.checker.override(rec["check_id"], "")["ok"])          # a reason is required
-        self.assertTrue(self.checker.override(rec["check_id"], "maintenance window, customers told", "root")["ok"])
-        out = self.gate.wrap_tool_call(_Req("lab__set_port", args), self.handler)
-        self.assertEqual(self.sent, ["lab__set_port"])
-        self.assertIn("overridden by root", out.content)
-
-    def test_an_override_holds_for_the_same_change_written_differently(self):
-        rec = self.checker.check("lab", "set_port", {"dpid": "p-1", "port_no": 2, "admin_state": "down"})
-        self.checker.override(rec["check_id"], "planned maintenance", "root")
-        self.gate.wrap_tool_call(_Req("lab__set_port", {"dpid": "p-1", "port_no": "2", "admin_state": "DOWN"}),
-                                 self.handler)
-        self.assertEqual(self.sent, ["lab__set_port"])
-
-    def test_an_override_covers_exactly_the_write_checked(self):
-        rec = self.checker.check("lab", "set_port", {"dpid": "p-1", "port_no": 2, "admin_state": "down"})
-        self.checker.override(rec["check_id"], "ok", "root")
-        self.gate.wrap_tool_call(_Req("lab__resize_path", {"name": "acme", "bandwidth_mbps": 95}), self.handler)
-        self.assertEqual(self.sent, [])
+    def test_canahs_contract_models_accept_the_check(self):
+        try:
+            from canah.twins import contract as C
+        except ImportError:
+            self.skipTest("CANAH is not importable here")
+        C.Check.model_validate(self.t.check_write("lab", "set_port", {"dpid": "p-1", "port_no": 2, "admin_state": "down"}, {}))
 
 
 if __name__ == "__main__":

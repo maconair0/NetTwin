@@ -25,10 +25,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .schema import Scenario, baseline_and_changed, set_path
+from .schema import Scenario
 
-IMAGE = os.getenv("NETWINS_IMAGE", "netwins-ns3:3.43")
-ENGINE_VERSION = {"ns3": "3.43", "engine": "netwins-ip 0.1", "schema": "1.0"}
+IMAGE = os.getenv("NETWINS_IMAGE", "netwins-ns3:3.43-r2")
+ENGINE_VERSION = {"ns3": "3.43", "image": IMAGE, "schema": "1.0"}
 
 
 def sample(sc: Scenario, i: int) -> Dict[str, float]:
@@ -48,46 +48,43 @@ def sample(sc: Scenario, i: int) -> Dict[str, float]:
     return out
 
 
-def members(sc: Scenario, start: int, count: int) -> List[Tuple[int, Dict[str, Any], Dict[str, Any]]]:
-    """[(seed, baseline member, changed member)] for members start..start+count-1."""
-    base, changed = baseline_and_changed(sc)
+def members(sc: Any, start: int, count: int) -> List[Tuple[int, Dict[str, Any], Dict[str, Any]]]:
+    """[(seed, baseline member, changed member)] for members start..start+count-1, of any domain."""
+    from . import domains
+    dom = domains.get(sc.domain)
+    base, changed = dom.baseline_and_changed(sc)
     out = []
     for i in range(start, start + count):
         draws = sample(sc, i)
         b, c = copy.deepcopy(base), copy.deepcopy(changed)
         for path, v in draws.items():
             for m in (b, c):
-                set_path(m, path, _clamp(path, v))
+                try:
+                    dom.set_path(m, path, dom.clamp(path, v))
+                except ValueError:
+                    pass          # the change removed what this path points at: nothing to sample there
         out.append((sc.seed_policy.base_seed + i, b, c))
     return out
-
-
-def _clamp(path: str, v: float) -> float:
-    """A sampled value kept physical: no negative delay or rate, loss in [0, 0.5]."""
-    field = path.rsplit(".", 1)[-1]
-    if field == "loss_rate":
-        return min(max(v, 0.0), 0.5)
-    if field == "queue_pkts":
-        return max(1, int(round(v)))
-    return max(v, 0.0)
 
 
 class DockerEngine:
     name = "docker"
 
     def __init__(self, image: str = IMAGE, context: str = "", cpus: str = "1", memory: str = "512m",
-                 timeout_s: float = 300.0):
+                 timeout_s: float = 300.0, program: str = "netwins-ip", view: Optional[Callable] = None):
         self.image, self.cpus, self.memory, self.timeout_s = image, cpus, memory, timeout_s
         self.context = context or os.getenv("NETWINS_DOCKER_CONTEXT", "default")
+        self.program, self.view = program, view or _engine_view
+        self.name = "docker" if program == "netwins-ip" else f"docker:{program}"
 
     def run(self, member: Dict[str, Any], seed: int) -> Dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="netwins-") as d:
             os.chmod(d, 0o777)
             with open(os.path.join(d, "member.json"), "w") as fh:
-                json.dump(_engine_view(member), fh)
+                json.dump(self.view(member), fh)
             cmd = ["docker", "--context", self.context, "run", "--rm", "--network", "none", "--read-only",
                    "--cpus", self.cpus, "--memory", self.memory, "--pids-limit", "64", "--cap-drop", "ALL",
-                   "--security-opt", "no-new-privileges", "-v", f"{d}:/work", self.image,
+                   "--security-opt", "no-new-privileges", "-v", f"{d}:/work", "--entrypoint", self.program, self.image,
                    "--scenario=/work/member.json", "--out=/work/result.json", f"--run={seed}"]
             done = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout_s)
             if done.returncode != 0:
@@ -99,13 +96,14 @@ class DockerEngine:
 class LocalEngine:
     name = "local"
 
-    def __init__(self, binary: str, timeout_s: float = 300.0):
+    def __init__(self, binary: str, timeout_s: float = 300.0, view: Optional[Callable] = None):
         self.binary, self.timeout_s = binary, timeout_s
+        self.view = view or _engine_view
 
     def run(self, member: Dict[str, Any], seed: int) -> Dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="netwins-") as d:
             with open(os.path.join(d, "member.json"), "w") as fh:
-                json.dump(_engine_view(member), fh)
+                json.dump(self.view(member), fh)
             done = subprocess.run([self.binary, f"--scenario={d}/member.json", f"--out={d}/result.json",
                                    f"--run={seed}"], capture_output=True, text=True, timeout=self.timeout_s)
             if done.returncode != 0:

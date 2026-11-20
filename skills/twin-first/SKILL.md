@@ -10,10 +10,10 @@ and the traffic the counters show now. A change runs in the twin, with and witho
 the network.
 
 1. **Know the network.** On a controller you have not mirrored in this conversation, call
-   `twin_mirror(controller)`. Note what it reports:
+   `twin_extra("mirror", {"controller": "<key>"})`. Note what it reports:
    - which link capacities and latencies were measured and which were assumed;
    - any background traffic that no service accounts for;
-   - `write_tools`, the controller's own write tools and the contract verb each serves.
+   - `write_tools`, the controller's own write tools and the contract verb each serves (twin_check_write lists them when a tool name is unknown).
 
 2. **Try the write.** Before sending any write, call
    `twin_check_write(controller, tool, arguments)`:

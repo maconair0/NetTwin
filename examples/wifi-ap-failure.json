@@ -1,0 +1,89 @@
+{
+ "schema_version": "1.0",
+ "domain": "wifi",
+ "snapshot_id": "<the snapshot it came from>",
+ "question": "if ap-1 fails at t=5, does the camera keep its loss under 1%?",
+ "topology": {
+  "aps": [
+   {
+    "id": "ap-1",
+    "x": 0,
+    "y": 0,
+    "channel": 36
+   },
+   {
+    "id": "ap-2",
+    "x": 30,
+    "y": 0,
+    "channel": 36
+   }
+  ],
+  "stations": [
+   {
+    "id": "cam",
+    "x": 8,
+    "y": 3
+   },
+   {
+    "id": "laptop",
+    "x": 25,
+    "y": -4
+   }
+  ],
+  "radio": {
+   "standard": "ax",
+   "path_loss_exponent": 3.0
+  }
+ },
+ "traffic": {
+  "demands": [
+   {
+    "id": "camera",
+    "src": "cam",
+    "dst": "server",
+    "protocol": "udp",
+    "rate_mbps": 8,
+    "start_s": 1
+   },
+   {
+    "id": "web",
+    "src": "server",
+    "dst": "laptop",
+    "protocol": "udp",
+    "rate_mbps": 20,
+    "start_s": 1
+   }
+  ]
+ },
+ "change": {
+  "events": [
+   {
+    "t": 5,
+    "type": "ap_down",
+    "target": "ap-1"
+   }
+  ]
+ },
+ "duration_s": 12,
+ "requirements": [
+  {
+   "demand": "camera",
+   "kpi": "loss_ratio",
+   "op": "<",
+   "value": 0.01
+  }
+ ],
+ "uncertain_params": [
+  {
+   "path": "radio.path_loss_exponent",
+   "dist": "uniform",
+   "low": 2.8,
+   "high": 3.4
+  }
+ ],
+ "seed_policy": {
+  "runs": 6,
+  "max_runs": 24,
+  "batch": 6
+ }
+}

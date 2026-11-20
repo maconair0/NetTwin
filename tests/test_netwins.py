@@ -70,7 +70,8 @@ class AgentFacing(unittest.TestCase):
     def test_a_link_as_an_anchor_stands_for_its_ends(self):
         from netwins import state
         got = state.subnetwork("ip", ["L-12"], 0)
-        self.assertEqual(sorted(n["id"] for n in got["topology"]["nodes"]), ["p-1", "p-2"])
+        self.assertTrue({"p-1", "p-2"} <= {n["id"] for n in got["topology"]["nodes"]})
+        self.assertIn("acme", {d["id"] for d in got["traffic"]["demands"]})    # it crosses L-12: it comes too
         whole = state.subnetwork("ip", [], 0)
         self.assertEqual(len(whole["topology"]["links"]), 6)
 
@@ -213,29 +214,50 @@ class Policies(unittest.TestCase):
                          "propose")                                          # off by default
 
 
-try:
-    import langchain_core  # noqa: F401 - only where CANAH's dependencies are installed
-    LANGCHAIN = True
-except ImportError:
-    LANGCHAIN = False
+class Contract(unittest.TestCase):
+    """netwins answers the canah.twin/1 contract: the shapes any agent can rely on."""
 
-
-@unittest.skipUnless(LANGCHAIN, "langchain is not installed (run with CANAH's Python)")
-class Provider(unittest.TestCase):
-    def test_the_scenario_goes_in_as_an_object_or_as_text(self):
+    def setUp(self):
         import tempfile
-        from netwins.canah_provider import NetwinsProvider
+        from netwins.contract import NetwinsTwin
+        self.t = NetwinsTwin(home=tempfile.mkdtemp(), engine="fake")
+
+    def test_describe_lists_every_twin_with_a_runnable_example(self):
+        d = self.t.describe()
+        self.assertEqual((d["contract"], d["name"]), ("canah.twin/1", "netwins"))
+        self.assertEqual([x["domain"] for x in d["domains"]], ["ip", "optical", "wifi"])
+        for x in d["domains"]:
+            self.assertTrue(x["answers"] and x["kpis"] and x["not_modelled"], x["domain"])
+            self.assertTrue(self.t.validate(x["example"])["ok"], x["domain"])
+        self.assertIn("check_write", d["capabilities"])
+
+    def test_a_prediction_comes_back_in_the_contracts_shape(self):
         from netwins.schema import EXAMPLE
-        p = NetwinsProvider(Twin(FakeEngine()), home=tempfile.mkdtemp())
-        tools = {x.name: x for x in p.tools()}
-        self.assertEqual(p.writes(), ["twin_override"])          # an override waits for an operator
-        for form in (EXAMPLE, json.dumps(EXAMPLE)):
-            self.assertTrue(json.loads(tools["twin_validate"].invoke({"scenario": form}))["ok"])
-        got = json.loads(tools["twin_predict"].invoke({"scenario": EXAMPLE}))
-        self.assertIn(got["decision"]["action"], ("reject", "gather_more_data", "propose"))
+        r = self.t.predict(EXAMPLE)
+        for k in ("contract", "ok", "twin", "domain", "run_id", "decision", "probability", "trust", "figures",
+                  "change_ran", "not_modelled"):
+            self.assertIn(k, r)
+        self.assertIn(r["decision"]["action"], ("propose", "reject", "gather_more_data", "met", "not_met"))
+        self.assertIn(r["trust"]["tier"], ("A", "B", "C"))
+        self.assertEqual((r["figures"][0]["entity"], r["figures"][0]["kpi"]), ("acme", "loss_ratio"))
+        self.assertEqual(r["change_ran"]["events"][0]["target"], "L-ab")
+
+    def test_a_bad_scenario_is_not_ok_and_says_why(self):
+        r = self.t.predict({"domain": "ip", "topology": {"nodes": [], "links": []}})
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["problems"])
+
+    def test_canahs_contract_models_accept_netwins_answers(self):
+        try:
+            from canah.twins import contract as C
+        except ImportError:
+            self.skipTest("CANAH is not importable here")
+        from netwins.schema import EXAMPLE
+        C.Description.model_validate(self.t.describe())
+        C.Result.model_validate(self.t.predict(EXAMPLE))
 
 
-DOCKER = subprocess.run(["docker", "--context", "default", "image", "inspect", "netwins-ns3:3.43"],
+DOCKER = subprocess.run(["docker", "--context", "default", "image", "inspect", "netwins-ns3:3.43-r2"],
                         capture_output=True).returncode == 0
 
 

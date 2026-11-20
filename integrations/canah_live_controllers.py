@@ -53,8 +53,6 @@ def main(argv=None) -> int:
     from canah import approval, build_agent, load_settings, models   # loads CANAH's .env
     from canah.identity import Identity
     from canah.network import AgenticMCPProvider
-    from netwins.canah_provider import NetwinsProvider
-    from netwins.gate import TwinGate
 
     if not os.getenv("AGENTIC_MCP_TOKEN"):
         print("AGENTIC_MCP_TOKEN is not set (CANAH's .env or the shell): the controllers cannot be called.")
@@ -64,8 +62,9 @@ def main(argv=None) -> int:
     s.home = str(home / "canah")
     s.sandbox = "none"
     s.skills_dirs = s.skills_dirs + [str(HERE / "skills")]
-    nw = NetwinsProvider(home=str(home))
-    agent = build_agent(s, [AgenticMCPProvider(), nw], middleware=[TwinGate()])
+    s.twins = [{"name": "netwins", "kind": "python", "spec": "netwins.contract:twin", "path": str(HERE)}]
+    s.twin_active = "netwins"
+    agent = build_agent(s, [AgenticMCPProvider()])
     who = Identity("operator", "admin")
     print(f"model {models.describe()['model']} · {agent.info['tools']} tools · subagents {agent.info['subagents']}",
           flush=True)
@@ -73,7 +72,7 @@ def main(argv=None) -> int:
     rows = []
     for cid, turns in [c for c in CASES if not only or c[0] in only]:
         thread, t0 = f"livectl-{int(time.time())}-{cid}", time.time()
-        before = set(nw.checker.checks)
+        before = set(agent.twin_checks.by_id)
         proposed, text, calls, err = [], "", [], ""
         try:
             for turn in turns:
@@ -89,7 +88,7 @@ def main(argv=None) -> int:
         except Exception as e:  # noqa: BLE001
             err = f"{type(e).__name__}: {e}"
         checks = [{k: v.get(k) for k in ("controller", "tool", "arguments", "action", "reasons")}
-                  for k2, v in nw.checker.checks.items() if k2 not in before]
+                  for k2, v in agent.twin_checks.by_id.items() if k2 not in before]
         rows.append({"case": cid, "seconds": round(time.time() - t0, 1), "calls": [c["name"] for c in calls],
                      "proposed_and_rejected": proposed, "twin_checks": checks, "answer": text, "error": err})
         print(f"\n## {cid} ({rows[-1]['seconds']}s){' ERROR ' + err if err else ''}\n calls: {rows[-1]['calls']}"
