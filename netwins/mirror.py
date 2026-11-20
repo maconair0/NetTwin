@@ -182,6 +182,13 @@ class _Snap:
 
 def mirror(source: Any, key: str, interval_s: float = 5.0, sleep=time.sleep) -> Dict[str, Any]:
     row = src.controller(source, key)
+    domain = str(row.get("domain") or "").lower()
+    if domain and domain not in ("packet", "ip", "sdn", "l2", "l3"):
+        # The mirror builds the IP twin's picture of a packet network. An optical controller's fibres and
+        # lightpaths are not that: filing them as an IP network only shadowed the real IP snapshots.
+        raise ValueError(f"{key} is a {domain} controller: the mirror builds IP snapshots of packet controllers. For a "
+                         f"what-if on it, describe its network in a scenario of the matching twin (twin_schema('optical') "
+                         f"for fibres and lightpaths)")
     tools = source.tools(key)
     v = src.verbs(row, tools)
     snap = _Snap(key)
@@ -339,6 +346,8 @@ def mirror(source: Any, key: str, interval_s: float = 5.0, sleep=time.sleep) -> 
         snap.prov.append("no traffic counters: the controller serves no read_statistics verb; the twin runs "
                          "only the services' own rates")
 
+    if not snap.nodes and not snap.links:
+        raise ValueError(f"{key} returned no devices and no links: there is nothing to mirror, so no snapshot was kept")
     now = time.time()
     links = [{k: v for k, v in l.items() if not k.startswith("_")} for l in snap.links]
     for l in links:

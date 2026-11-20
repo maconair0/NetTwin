@@ -35,11 +35,15 @@ ANSWERS = {
                "span, a faster mode or a new lightpath, and what that does to the traffic they carry.",
     "wifi": "What an access point failing, a move, transmit power, channel or width, or more traffic does to each "
             "station's throughput, delay and loss, roaming included.",
-}
+    "ntn": "What rain on a site, a satellite or gateway lost, inter-satellite links cut, another orbit or more traffic "
+           "does to a satellite (LEO, MEO, GEO) or HAPS link's availability, throughput, delay and link margin over a "
+           "window of time, handovers and Doppler included."}
 KPIS = {"ip": ["throughput_mbps", "delay_ms_mean", "jitter_ms_mean", "loss_ratio"],
         "optical": ["gsnr_db", "osnr_db", "margin_db", "pre_fec_ber", "up", "path_km", "hops",
                     "throughput_mbps", "loss_ratio", "delay_ms_mean"],
-        "wifi": ["throughput_mbps", "delay_ms_mean", "jitter_ms_mean", "loss_ratio"]}
+        "wifi": ["throughput_mbps", "delay_ms_mean", "jitter_ms_mean", "loss_ratio"],
+        "ntn": ["availability", "throughput_mbps", "loss_ratio", "delay_ms_mean", "delay_ms_max", "margin_db_min",
+                "handovers", "doppler_khz_max"]}
 
 
 def _stats(s: Optional[Dict[str, Any]]) -> Optional[Dict[str, float]]:
@@ -91,7 +95,7 @@ class NetwinsTwin:
                         "example": d.example, "fidelity": d.fidelity, "not_modelled": d.not_modelled,
                         "engine": d.engine_version, "skill": d.skill})
         return {"contract": CONTRACT, "name": "netwins", "version": VERSION,
-                "about": "ns-3 and GNPy digital twins of IP, optical and Wi-Fi networks, with calibrated trust and a "
+                "about": "ns-3 and GNPy digital twins of IP, optical and Wi-Fi networks, and of non-terrestrial (satellite and HAPS) networks, with calibrated trust and a "
                          "deterministic decision policy",
                 "domains": out, "capabilities": ["validate", "predict", "check_write", "extras"],
                 "controller_domains": ["packet", "ip"], "extras": EXTRAS}

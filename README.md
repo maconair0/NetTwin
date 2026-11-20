@@ -5,13 +5,14 @@
 **NetTwin runs a network change, or a failure, on a digital copy of the network before the real one sees it.** It then says
 whether the change can go ahead, how sure it is, and why.
 
-It has three twins, one per kind of network, behind one pipeline:
+It has four twins, one per kind of network, behind one pipeline:
 
 | Twin | Engine | Answers questions like |
 |---|---|---|
 | **ip** | [ns-3](https://www.nsnam.org) (packet-level) | "If link L-12 fails, does acme keep its loss under 1%?" · "Would doubling L-13 make the detour safe?" |
 | **optical** | [GNPy](https://github.com/Telecominfraproject/oopt-gnpy) (physical layer) | "If fibre A-B is cut, does lightpath LP-1 keep 3 dB of margin after it restores?" · "Could it run at 400G?" |
 | **wifi** | ns-3 802.11ax/ac/n | "If access point ap-1 fails, does the camera keep its loss under 1% while it roams?" |
+| **ntn** | orbital geometry and link budgets (Python) | "If 25 mm/h of rain falls on the Turin terminal, does its LEO backhaul keep 99% availability?" · "What if we lose the inter-satellite links?" |
 
 Three things set it apart from running a simulator by hand:
 
@@ -69,6 +70,7 @@ Ask a question from the command line. Each example names its twin in its `"domai
 .venv/bin/python -m netwins predict  examples/acme-L12-failure.json     # IP: a link failure
 .venv/bin/python -m netwins predict  examples/optical-cut.json          # optical: a fibre cut and restoration
 .venv/bin/python -m netwins predict  examples/wifi-ap-failure.json      # Wi-Fi: an access point fails
+.venv/bin/python -m netwins predict  examples/ntn-rain-fade.json        # NTN: rain on a LEO terminal
 .venv/bin/python -m netwins predict  examples/acme-L12-failure.json --engine fake   # no Docker: a stand-in model, for trying it out
 ```
 
@@ -137,10 +139,10 @@ scenario (JSON) ──► validate ──► ensemble ────────�
 
 ---
 
-## Scenarios: the three twins
+## Scenarios: the four twins
 
 A scenario is JSON: the network, the traffic, the what-if (`change`), what must hold (`requirements`) and what is
-not known exactly (`uncertain_params`). `python -m netwins schema --domain <ip|optical|wifi>` prints the full JSON
+not known exactly (`uncertain_params`). `python -m netwins schema --domain <ip|optical|wifi|ntn>` prints the full JSON
 Schema, and `examples/` has one runnable scenario per twin.
 
 Paths name fields the same way everywhere: `<kind>.<id>.<field>` (`links.L-12.rate_mbps`) or `<kind>.<field>`
@@ -208,6 +210,38 @@ Paths name fields the same way everywhere: `<kind>.<id>.<field>` (`links.L-12.ra
 - **Association:** a station starts on the access point it hears loudest (log-distance path loss). When that one
   fails, it re-associates with another on the same channel after ns-3's missed-beacon timeout.
 - **Changes** can move access points or stations, or change power, channel, width or the path-loss exponent.
+
+### Non-terrestrial (`"domain": "ntn"`)
+
+Satellites (LEO, MEO, GEO) and high-altitude platforms (HAPS) carrying traffic between ground sites, followed
+over a window of time (`duration_s`, every `step_s`) while the satellites move.
+
+```json
+{"domain": "ntn",
+ "topology": {"sites": [{"id": "T-turin", "kind": "terminal", "lat_deg": 45.07, "lon_deg": 7.69, "eirp_dbw": 45, "g_t_dbk": 13},
+                        {"id": "GW-fucino", "kind": "gateway", "lat_deg": 42.0, "lon_deg": 13.6, "eirp_dbw": 70, "g_t_dbk": 30}],
+              "constellations": [{"id": "LEO", "planes": 24, "per_plane": 22, "altitude_km": 550, "inclination_deg": 53, "isl": true}]},
+ "radio": {"uplink_ghz": 30, "downlink_ghz": 20, "bandwidth_mhz": 250},
+ "traffic": {"flows": [{"id": "backhaul-1", "src": "T-turin", "dst": "GW-fucino", "rate_mbps": 100}]},
+ "change": {"events": [{"t": 0, "type": "rain", "target": "T-turin", "value": 25}]},
+ "duration_s": 600, "step_s": 10,
+ "requirements": [{"demand": "backhaul-1", "kpi": "availability", "op": ">=", "value": 0.99}]}
+```
+
+- **KPIs per flow:** `availability`, `throughput_mbps`, `loss_ratio`, `delay_ms_mean`, `delay_ms_max`,
+  `margin_db_min`, `handovers`, `doppler_khz_max`.
+- **Each step:**
+  1. where every satellite is (circular orbits under a turning Earth; a GEO over its longitude; a HAPS fixed);
+  2. which satellites each site sees above its minimum elevation;
+  3. the route: up, across inter-satellite links (a +Grid in a Walker constellation) when there are any, down.
+     The serving satellite is kept while it can be; a handover interrupts the flow for `handover_ms`;
+  4. each hop's link budget (free-space, gaseous and rain loss from ITU-R P.838/P.618, simplified; pointing
+     loss; G/T), the DVB-S2X MODCOD it allows, and its capacity, shared by the flows on a satellite.
+- **Changes:** rain on a site (`rain`, mm/h), a satellite or a gateway lost, inter-satellite links cut
+  (`isl_down`, one satellite or `all`), more flows, or any settable value (`radio.bandwidth_mhz`,
+  `sites.<id>.g_t_dbk`, a constellation's EIRP ...).
+- **Measured on the example:** clear sky gives 99.97% availability and 11.4 ms. 25 mm/h of rain on the terminal's
+  30 GHz uplink gives 66.6% availability, and the twin rejects it. A GEO path takes more than 240 ms.
 
 ---
 
@@ -300,6 +334,9 @@ statistics, provision, tear down, adjust, configure a device.
 tools, as the agentic MCP maps them, and reads the traffic counters twice, a few seconds apart.
 - **What goes in the snapshot:** the topology, link capacities, services as demands, and the traffic the counters
   show beyond the services, as background load.
+- **Packet controllers only:** the mirror builds the IP twin's picture. It refuses an optical controller, whose
+  fibres and lightpaths belong in an optical scenario instead, and it keeps no snapshot when a controller returns
+  no devices and no links. Such an empty snapshot used to be filed as an IP network and hid the real ones.
 - **Every value is marked** measured or assumed.
 - **Assumptions cap the trust:** if fewer than half the link capacities came from the controller, predictions on
   that snapshot are capped at tier C.
@@ -370,8 +407,18 @@ twins:
 ```
 
 CANAH's agent then uses NetTwin through its twin tools, and its write gate holds controller writes to NetTwin's
-checks. The skills in `skills/` (`ip-twin`, `optical-twin`, `wifi-twin`, `twin-first`) tell an agent how to use each
+checks. The skills in `skills/` (`ip-twin`, `optical-twin`, `wifi-twin`, `ntn-twin`, `twin-first`) tell an agent how to use each
 twin well; add the folder to CANAH's `skills_dirs`.
+
+What CANAH shows of it:
+- **Topology:** NetTwin is drawn beside CANAH, with its logo, and lit while CANAH is asking it. A second line
+  shows that it mirrors the live networks through the agentic MCP.
+- **Digital twins page:** NetTwin is the twin in use, with its four domains, their KPIs, fidelity and what each
+  does not model.
+- **Chat:** it says when a change is being rehearsed in NetTwin, or a write checked there before it is sent.
+
+CANAH's controller writes are now its contract-verb tools (`net_provision`, …) and `controller_write`. CANAH's
+gate tells NetTwin which controller and which of its tools a write will reach, so `check_write` is unchanged.
 
 ---
 
@@ -427,7 +474,7 @@ The plan, roadmap and what may be claimed are in [plan.md](plan.md).
 | `netwins/contract.py`, `service.py` | the `canah.twin/1` contract, in-process and over HTTP |
 | `netwins/twin.py` | the pipeline: validate, ensemble, aggregate, calibrate, decide |
 | `netwins/domains.py` | the twins behind one pipeline: each a model, an engine and a skill |
-| `netwins/schema.py`, `optical.py`, `wifi.py` | each twin's scenario, limits and checks; the optical engine (GNPy); a stand-in Wi-Fi engine for tests |
+| `netwins/schema.py`, `optical.py`, `wifi.py`, `ntn.py` | each twin's scenario, limits and checks; the optical engine (GNPy); a stand-in Wi-Fi engine for tests |
 | `netwins/runner.py` | sampling, paired members, the engines (Docker, local, stand-in) |
 | `netwins/aggregate.py`, `calibration.py`, `policy.py` | statistics; conformal calibration and trust tiers; the decision table |
 | `netwins/paths.py` | the fields a change may set or an uncertainty may sample |
@@ -462,6 +509,9 @@ PYTHONPATH=.:~/CANAH ~/CANAH/.venv/bin/python -m unittest discover -s tests -t .
   - log-distance propagation, with no walls or multipath beyond the exponent;
   - ns-3's ideal rate control;
   - roaming only within a channel, and no client vendor behaviour.
+- **NTN:** circular orbits on a spherical Earth (no J2, drag or eccentricity); simplified rain and gaseous loss,
+  no scintillation or cloud; no interference between beams or satellites; Doppler is reported, not its effect on
+  the receiver; a handover is a fixed interruption; traffic is fluid (no TCP, no queues).
 - **One domain per question:** a change in one domain is not propagated into another.
 - **Calibration** is only as good as its truth: synthetic truth can reach tier B, never A. A lab simulator is
   labelled as such.

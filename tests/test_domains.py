@@ -198,3 +198,77 @@ class WifiOnNs3(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NTN(unittest.TestCase):
+    """Satellites and HAPS: geometry, link budget, the what-ifs."""
+
+    def setUp(self):
+        import copy
+        from netwins.ntn import EXAMPLE
+        self.ex = copy.deepcopy(EXAMPLE)
+        self.ex["seed_policy"] = {"runs": 2, "max_runs": 2}
+        self.ex["uncertain_params"] = []
+
+    def run_member(self, sc):
+        from netwins import domains
+        d = domains.get("ntn")
+        base, changed = d.baseline_and_changed(d.model.model_validate(sc))
+        e = d.engine("fake")
+        return e.run(base, 0)["demands"], e.run(changed, 0)["demands"]
+
+    def test_the_example_is_valid_and_rain_costs_availability(self):
+        from netwins import domains
+        d = domains.get("ntn")
+        self.assertEqual(d.problems(d.model.model_validate(self.ex)), [])
+        base, rain = self.run_member(self.ex)
+        self.assertGreater(base["backhaul-1"]["availability"], 0.95)
+        self.assertLess(rain["backhaul-1"]["availability"], base["backhaul-1"]["availability"])
+        self.assertLess(base["backhaul-1"]["delay_ms_mean"], 40)          # LEO: tens of ms
+
+    def test_a_geo_link_takes_a_quarter_second_each_way(self):
+        sc = dict(self.ex)
+        sc["topology"] = {"sites": self.ex["topology"]["sites"],
+                          "satellites": [{"id": "GEO-13E", "kind": "geo", "altitude_km": 35786, "phase_deg": 13.0,
+                                          "eirp_dbw": 60, "g_t_dbk": 15}]}
+        sc["change"] = None
+        sc["radio"] = {"uplink_ghz": 30, "downlink_ghz": 20, "bandwidth_mhz": 36}   # a GEO carrier, not a LEO beam
+        sc["topology"]["sites"][0]["eirp_dbw"] = 55
+        for s in sc["topology"]["sites"]:
+            s["min_elevation_deg"] = 10
+        base, _ = self.run_member(sc)
+        self.assertGreater(base["backhaul-1"]["delay_ms_mean"], 240)
+        self.assertEqual(base["backhaul-1"]["handovers"], 0)
+
+    def test_losing_the_inter_satellite_links_or_the_gateway(self):
+        sc = dict(self.ex)
+        sc["change"] = {"events": [{"t": 0, "type": "site_down", "target": "GW-fucino"}]}
+        _, down = self.run_member(sc)
+        self.assertEqual(down["backhaul-1"]["availability"], 0)
+        self.assertEqual(down["backhaul-1"]["throughput_mbps"], 0)
+
+    def test_rain_fade_grows_with_frequency_and_rain(self):
+        from netwins.ntn import rain_db
+        self.assertLess(rain_db(12, 25, 40), rain_db(30, 25, 40))
+        self.assertLess(rain_db(20, 5, 40), rain_db(20, 50, 40))
+        self.assertEqual(rain_db(20, 0, 40), 0.0)
+
+    def test_problems_are_said(self):
+        from netwins import domains
+        d = domains.get("ntn")
+        bad = dict(self.ex)
+        bad["change"] = {"events": [{"t": 0, "type": "satellite_down", "target": "nope"},
+                                    {"t": 0, "type": "rain", "target": "T-turin"}]}
+        got = d.problems(d.model.model_validate(bad))
+        self.assertTrue(any("no satellite 'nope'" in p for p in got), got)
+        self.assertTrue(any("mm/h" in p for p in got), got)
+
+    def test_the_twin_describes_it_and_predicts_through_the_contract(self):
+        from netwins.contract import twin
+        t = twin()
+        doms = {d["domain"]: d for d in t.describe()["domains"]}
+        self.assertIn("ntn", doms)
+        self.assertIn("availability", doms["ntn"]["kpis"])
+        r = t.predict(self.ex)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["decision"]["action"], "reject")              # 25 mm/h on a Ka uplink

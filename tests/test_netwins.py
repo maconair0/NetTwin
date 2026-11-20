@@ -225,7 +225,7 @@ class Contract(unittest.TestCase):
     def test_describe_lists_every_twin_with_a_runnable_example(self):
         d = self.t.describe()
         self.assertEqual((d["contract"], d["name"]), ("canah.twin/1", "netwins"))
-        self.assertEqual([x["domain"] for x in d["domains"]], ["ip", "optical", "wifi"])
+        self.assertEqual([x["domain"] for x in d["domains"]], ["ip", "optical", "wifi", "ntn"])
         for x in d["domains"]:
             self.assertTrue(x["answers"] and x["kpis"] and x["not_modelled"], x["domain"])
             self.assertTrue(self.t.validate(x["example"])["ok"], x["domain"])

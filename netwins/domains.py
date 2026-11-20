@@ -104,7 +104,20 @@ def _wifi() -> Domain:
         fidelity=w.FIDELITY, skill="wifi-twin", engine_version="netwins-wifi 0.1")
 
 
-_FACTORIES = {"ip": _ip, "optical": _optical, "wifi": _wifi}
+def _ntn() -> Domain:
+    from . import ntn as n
+
+    def engine(spec: str):
+        return n.NTNEngine()              # geometry and link budgets: fast and local, tests use the real thing
+
+    return Domain(
+        name="ntn", title="Non-terrestrial (satellite / HAPS)", model=n.NScenario, problems=n.problems,
+        baseline_and_changed=n.baseline_and_changed, set_path=n.set_path, clamp=n.clamp, resolve=n.resolve,
+        new_entities=n.new_entities, engine=engine, example=n.EXAMPLE, not_modelled=n.NOT_MODELLED,
+        fidelity=n.FIDELITY, skill="ntn-twin", engine_version=n.NTNEngine.version())
+
+
+_FACTORIES = {"ip": _ip, "optical": _optical, "wifi": _wifi, "ntn": _ntn}
 _CACHE: Dict[str, Domain] = {}
 
 
