@@ -473,4 +473,4 @@ PYTHONPATH=.:~/CANAH ~/CANAH/.venv/bin/python -m unittest discover -s tests -t .
 - **[maconair0](https://github.com/maconair0)**: owner and author.
 - **Claude (Anthropic)**: co-contributor: code, tests and documentation, written with the author.
 
-ns-3 is GPL-2.0 and is built into the engine image, not into this repository's code. GNPy is BSD-3-Clause.
+MIT: see [LICENSE](LICENSE). ns-3 (GPL-2.0) is built into the engine image, not into this repository's code; GNPy is BSD-3-Clause.
