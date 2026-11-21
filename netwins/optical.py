@@ -412,7 +412,7 @@ def _shortest(fibres: Dict[str, Dict[str, Any]], up: Dict[str, bool], src: str, 
 
 
 EXAMPLE = {
-    "schema_version": "1.0", "domain": "optical", "snapshot_id": "<the snapshot it came from>",
+    "schema_version": "1.0", "domain": "optical", "snapshot_id": "",
     "question": "if fibre F-ab is cut, does LP-1 keep a 3 dB margin after it restores?",
     "topology": {"nodes": [{"id": "A"}, {"id": "B"}, {"id": "C"}],
                  "links": [{"id": "F-ab", "a": "A", "z": "B", "length_km": 240},

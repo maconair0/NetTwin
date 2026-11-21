@@ -563,7 +563,7 @@ class FakeNTNEngine(NTNEngine):
 
 
 EXAMPLE = {
-    "schema_version": "1.0", "domain": "ntn", "snapshot_id": "<the snapshot it came from>",
+    "schema_version": "1.0", "domain": "ntn", "snapshot_id": "",
     "question": "if heavy rain (25 mm/h) falls on the Turin terminal, does it keep 99% availability and 50 ms?",
     "topology": {
         "sites": [{"id": "T-turin", "kind": "terminal", "lat_deg": 45.07, "lon_deg": 7.69, "eirp_dbw": 45, "g_t_dbk": 13},

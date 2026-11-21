@@ -280,7 +280,7 @@ def baseline_and_changed(sc: Scenario) -> tuple:
 
 
 EXAMPLE = {   # valid as it stands (tests check it): a triangle, a failure, a loss requirement
-    "schema_version": "1.0", "domain": "ip", "snapshot_id": "<the snapshot the slice came from>",
+    "schema_version": "1.0", "domain": "ip", "snapshot_id": "",
     "question": "does acme keep its loss under 1% if L-ab fails at t=10?",
     "topology": {"nodes": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
                  "links": [{"id": "L-ab", "a": "a", "z": "b", "rate_mbps": 100, "delay_ms": 5},

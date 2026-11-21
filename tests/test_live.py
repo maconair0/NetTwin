@@ -40,7 +40,8 @@ class Lab(unittest.TestCase):
         self.checker = Checker(Twin(FakeEngine(), calibrated()), AgenticSource(self.url), interval_s=0.5)
 
     def tearDown(self):
-        os.environ.pop("NETWINS_SNAPSHOTS", None)
+        from tests import SAMPLES
+        os.environ["NETWINS_SNAPSHOTS"] = SAMPLES
 
 
 class Slicing(unittest.TestCase):

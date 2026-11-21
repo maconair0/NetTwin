@@ -312,7 +312,7 @@ class FakeWifiEngine:
 
 
 EXAMPLE = {
-    "schema_version": "1.0", "domain": "wifi", "snapshot_id": "<the snapshot it came from>",
+    "schema_version": "1.0", "domain": "wifi", "snapshot_id": "",
     "question": "if ap-1 fails at t=5, does the camera keep its loss under 1%?",
     "topology": {"aps": [{"id": "ap-1", "x": 0, "y": 0, "channel": 36}, {"id": "ap-2", "x": 30, "y": 0, "channel": 36}],
                  "stations": [{"id": "cam", "x": 8, "y": 3}, {"id": "laptop", "x": 25, "y": -4}],
